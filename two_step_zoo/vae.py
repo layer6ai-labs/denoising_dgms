@@ -3,18 +3,19 @@ import torch
 
 from .density_estimator import DensityEstimator
 from .generalized_autoencoder import GeneralizedAutoEncoder
-from .utils import batch_or_dataloader
+from .utils import batch_or_dataloader, tweedie_denoising
 from .distributions import diagonal_gaussian_log_prob, diagonal_gaussian_entropy, diagonal_gaussian_sample
 
 
 class GaussianVAE(GeneralizedAutoEncoder, DensityEstimator):
     model_type = "vae"
 
-    def sample(self, n_samples, true_sample=True):
+    @tweedie_denoising
+    def sample_transformed(self, n_samples, true_sample=True):
         z = torch.randn((n_samples, self.latent_dim)).to(self.device)
         mu, log_sigma = self.decode_to_transformed(z)
         sample = diagonal_gaussian_sample(mu, torch.exp(log_sigma)) if true_sample else mu
-        return self._inverse_data_transform(sample)
+        return sample
 
     @batch_or_dataloader()
     def log_prob(self, x, k=1):

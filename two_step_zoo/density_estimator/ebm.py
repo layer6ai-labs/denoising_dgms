@@ -4,7 +4,7 @@ import torch
 import numpy as np
 
 from . import DensityEstimator
-from ..utils import batch_or_dataloader
+from ..utils import batch_or_dataloader, tweedie_denoising
 
 
 class EnergyBasedModel(DensityEstimator):
@@ -73,8 +73,20 @@ class EnergyBasedModel(DensityEstimator):
 
         return x
 
-    def sample(self, n_samples, steps=60, step_size=10, eps_new=0.0, sigma=0.005, grad_clamp=0.03,
-               for_loss=False, update_buffer=False):
+    @tweedie_denoising
+    def sample_transformed(self, n_samples, steps=60, step_size=10, eps_new=0.0, sigma=0.005, grad_clamp=0.03,
+                           update_buffer=False):
+        x = self._sample_transformed(n_samples=n_samples,
+                                     steps=steps,
+                                     step_size=step_size,
+                                     eps_new=eps_new,
+                                     sigma=sigma,
+                                     grad_clamp=grad_clamp,
+                                     update_buffer=update_buffer)
+        return x
+
+    def _sample_transformed(self, n_samples, steps=60, step_size=10, eps_new=0.0, sigma=0.005, grad_clamp=0.03,
+                            update_buffer=False):
         # Initialize langevin dynamics from random noise and buffer
         n_new = np.random.binomial(n_samples, eps_new)
         rand_x = torch.rand((n_new,) + self.x_shape) * self.diff + self.x_lims[0]
@@ -90,10 +102,7 @@ class EnergyBasedModel(DensityEstimator):
             self.buffer = torch.cat((x.cpu(), self.buffer))
             self.buffer = self.buffer[:self.max_length_buffer]
 
-        if for_loss:
-            return x
-        else:
-            return self._inverse_data_transform(x)
+        return x
 
     @batch_or_dataloader()
     def log_prob(self, x):
@@ -106,14 +115,13 @@ class EnergyBasedModel(DensityEstimator):
         batch_size = x.shape[0]
         x = self._data_transform(x)
         pos = self.energy_func(x)
-        neg = self.energy_func(self.sample(n_samples=batch_size,
-                                           steps=self.ld_steps,
-                                           step_size=self.ld_step_size,
-                                           eps_new=self.ld_eps_new,
-                                           sigma=self.ld_sigma,
-                                           grad_clamp=self.ld_grad_clamp,
-                                           for_loss=True,
-                                           update_buffer=True)
+        neg = self.energy_func(self._sample_transformed(n_samples=batch_size,
+                                                        steps=self.ld_steps,
+                                                        step_size=self.ld_step_size,
+                                                        eps_new=self.ld_eps_new,
+                                                        sigma=self.ld_sigma,
+                                                        grad_clamp=self.ld_grad_clamp,
+                                                        update_buffer=True)
                                )
         cd_loss = (pos - neg).mean()
         reg_loss = (torch.square(pos) + torch.square(neg)).mean()

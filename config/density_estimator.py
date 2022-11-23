@@ -20,6 +20,7 @@ def get_base_config(dataset, standalone):
     return {
         "flatten": True,
         "denoising_sigma": None,
+        "use_tweedie_if_denoising": True,
         "dequantize": False,
         "scale_data": scale_data,
         "whitening_transform": whitening_transform,
@@ -166,9 +167,11 @@ def get_flow_config(dataset, standalone):
         hidden_units = 64
         lr = 0.001
         standalone_info = {}
+
+    scale_data = dataset in ["mnist", "fashion-mnist"]
     flow_config = {
-        "scale_data": False,
-        "whitening_transform": True,
+        "scale_data": scale_data,
+        "whitening_transform": not scale_data,
 
         "transform": "simple_nsf",
         "hidden_units": hidden_units,

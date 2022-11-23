@@ -5,7 +5,7 @@ from torch.nn.functional import binary_cross_entropy_with_logits
 from .generalized_autoencoder import GeneralizedAutoEncoder
 from .density_estimator import DensityEstimator
 from .distributions import diagonal_gaussian_sample, diagonal_gaussian_log_prob
-from .utils import batch_or_dataloader
+from .utils import batch_or_dataloader, tweedie_denoising
 
 
 class AdversarialVariationalBayes(GeneralizedAutoEncoder, DensityEstimator):
@@ -100,12 +100,13 @@ class AdversarialVariationalBayes(GeneralizedAutoEncoder, DensityEstimator):
 
         return log_p_x_given_z - d_z
 
-    def sample(self, n_samples, true_sample=True):
+    @tweedie_denoising
+    def sample_transformed(self, n_samples, true_sample=True):
         # NOTE: Same as GaussianVAE
         z = torch.randn((n_samples, self.latent_dim)).to(self.device)
         mu, log_sigma = self.decode_to_transformed(z)
         sample = diagonal_gaussian_sample(mu, torch.exp(log_sigma)) if true_sample else mu
-        return self._inverse_data_transform(sample)
+        return sample
 
     def set_optimizer(self, cfg):
         disc_optimizer = self._OPTIMIZER_MAP[cfg["optimizer"]](

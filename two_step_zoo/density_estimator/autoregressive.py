@@ -2,7 +2,7 @@ import torch
 
 from . import DensityEstimator
 from ..distributions import get_gaussian_mixture
-from ..utils import batch_or_dataloader
+from ..utils import batch_or_dataloader, tweedie_denoising
 
 
 class AutoRegressiveModel(DensityEstimator):
@@ -33,7 +33,11 @@ class GaussianMixtureLSTMModel(AutoRegressiveModel):
         out = gmm.log_prob(torch.permute(x.flatten(start_dim=2), (0, 2, 1)))
         return out.sum(dim=1, keepdim=True)
 
-    def sample(self, n_samples):
+    # @tweedie_denoising
+    def sample_transformed(self, n_samples):
+        # NOTE: tweedie denoising does not work with ARMs because RNN backward can only be called in training mode, i.e.
+        #       when computing the gradients wrt x to apply Tweedie's formula, ar_network would have to be in train mode
+        #       rather than eval mode, but this can mess up stored gradients wrt model parameters.
         mix_params = self.ar_network.linear(torch.zeros((n_samples, 1, self.ar_network.hidden_size)).to(self.device))
         weights, mus, sigmas = self.ar_network.split_transform_and_reshape(mix_params)
         new_coordinate = get_gaussian_mixture(weights, mus, sigmas).sample()
@@ -51,4 +55,4 @@ class GaussianMixtureLSTMModel(AutoRegressiveModel):
         else:
             samples = torch.permute(samples, (0, 2, 1))
             samples = torch.reshape(samples, (samples.shape[0], samples.shape[1], self.image_height, -1))
-        return self._inverse_data_transform(samples)
+        return samples

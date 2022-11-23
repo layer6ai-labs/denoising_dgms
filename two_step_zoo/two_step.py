@@ -175,8 +175,6 @@ class TwoStepComponent(nn.Module):
     def _data_transform(self, data):
         if self.flatten:
             data = data.flatten(start_dim=1)
-        if self.denoising_sigma is not None and self.training:
-            data = data + torch.randn_like(data) * self.denoising_sigma
         if self.dequantize:
             data = data + torch.rand_like(data)
         if self.scale_data:
@@ -186,6 +184,8 @@ class TwoStepComponent(nn.Module):
             data = data / self.whitening_sigma
         if self.logit_transform:
             data = torch.logit(data)
+        if self.denoising_sigma is not None and self.training:
+            data = data + torch.randn_like(data) * self.denoising_sigma
         return data
 
     def _inverse_data_transform(self, data):

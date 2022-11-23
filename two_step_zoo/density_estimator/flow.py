@@ -2,7 +2,7 @@ from nflows.distributions import Distribution, StandardNormal
 from nflows.flows.base import Flow
 
 from . import DensityEstimator
-from ..utils import batch_or_dataloader
+from ..utils import batch_or_dataloader, tweedie_denoising
 
 
 class NormalizingFlow(DensityEstimator):
@@ -23,9 +23,9 @@ class NormalizingFlow(DensityEstimator):
             distribution=self.base_distribution
         )
 
-    def sample(self, n_samples):
-        samples = self._nflow.sample(n_samples)
-        return self._inverse_data_transform(samples)
+    @tweedie_denoising
+    def sample_transformed(self, n_samples):
+        return self._nflow.sample(n_samples)
 
     @batch_or_dataloader()
     def log_prob(self, x):

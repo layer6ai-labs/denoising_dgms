@@ -31,3 +31,31 @@ def batch_or_dataloader(agg_func=torch.cat):
         return batch_fn_wrapper
 
     return decorator
+
+
+def tweedie_denoising(fn):
+    def wrapper(*args):
+        de = args[0]
+        if de.denoising_sigma is None or not de.use_tweedie_if_denoising:
+            return fn(*args)
+        else:
+            is_training = de.training
+            de.eval()
+            for p in de.parameters():
+                p.requires_grad = False
+            had_gradients_enabled = torch.is_grad_enabled()
+            torch.set_grad_enabled(True)
+            samples = fn(*args)
+            samples.requires_grad = True
+            log_p = de.log_prob(samples)
+            log_p.sum().backward()
+            grad = samples.grad.detach()
+            with torch.no_grad():
+                samples = samples + de.denoising_sigma**2 * grad
+            for p in de.parameters():
+                p.requires_grad = True
+            de.train(is_training)
+            torch.set_grad_enabled(had_gradients_enabled)
+            return samples
+
+    return wrapper

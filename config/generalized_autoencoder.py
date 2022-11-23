@@ -208,6 +208,8 @@ def get_vae_config(dataset, standalone):
         "latent_dim": 20,
 
         "single_sigma": True,
+
+        "use_tweedie_if_denoising": True,
     }
 
     if net == "mlp":

@@ -69,6 +69,7 @@ def get_vae_module(cfg):
         latent_dim=cfg["latent_dim"],
         encoder=encoder,
         decoder=decoder,
+        use_tweedie_if_denoising=cfg.get("use_tweedie_if_denoising", True),
         **get_data_transform_kwargs(cfg)
     )
 
@@ -86,6 +87,7 @@ def get_avb_module(cfg):
         input_sigma=cfg["input_sigma"],
         prior_sigma=cfg["prior_sigma"],
         cnn=True if cfg["encoder_net"] == "cnn" else False,
+        use_tweedie_if_denoising=cfg.get("use_tweedie_if_denoising", True),
         **get_data_transform_kwargs(cfg)
     )
 
@@ -191,6 +193,7 @@ def get_flow_module(cfg):
         dim=cfg["data_dim"],
         transform=transform,
         base_distribution=base_distribution,
+        use_tweedie_if_denoising=cfg.get("use_tweedie_if_denoising", True),
         **get_data_transform_kwargs(cfg)
     )
 
@@ -238,6 +241,7 @@ def get_ebm_module(cfg):
         ld_sigma=cfg["ld_sigma"],
         ld_grad_clamp=cfg["ld_grad_clamp"],
         loss_alpha=cfg["loss_alpha"],
+        use_tweedie_if_denoising=cfg.get("use_tweedie_if_denoising", True),
         **get_data_transform_kwargs(cfg)
     )
 
@@ -259,6 +263,7 @@ def get_arm_module(cfg):
         ar_network=ar_network,
         image_height=image_height,
         input_length=image_length,
+        use_tweedie_if_denoising=cfg.get("use_tweedie_if_denoising", True),
         **get_data_transform_kwargs(cfg)
     )
 
