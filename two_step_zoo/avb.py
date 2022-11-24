@@ -64,15 +64,26 @@ class AdversarialVariationalBayes(GeneralizedAutoEncoder, DensityEstimator):
 
     def _discr_error_batch(self, x):
         x = self._data_transform(x)
-        z_q = self.encode_transformed(x)
+
+        sigma_denoising = 0.
+        if self.max_sigma is not None:
+            x, sigma_denoising = self._add_noise_for_denoising(x)
+
+        z_q = self.encode_transformed(self._expand_input_for_denoising(x, sigma_denoising, 'encoder'))
 
         mu_p = torch.zeros((x.shape[0], self.latent_dim)).to(self.device)
         z_p = diagonal_gaussian_sample(mu_p, self.prior_sigma)
 
         # NOTE: Discriminator always is MLP so flatten inputs
         x_flat = x.flatten(start_dim=1)
-        d_z_q = self.discriminator(torch.cat((x_flat, z_q), 1))
-        d_z_p = self.discriminator(torch.cat((x_flat, z_p), 1))
+        d_z_q = self.discriminator(self._expand_input_for_denoising(torch.cat((x_flat, z_q), 1),
+                                                                    sigma_denoising,
+                                                                    'discriminator')
+                                   )
+        d_z_p = self.discriminator(self._expand_input_for_denoising(torch.cat((x_flat, z_p), 1),
+                                                                    sigma_denoising,
+                                                                    'discriminator')
+                                   )
 
         ones = torch.ones_like(d_z_q)
         zeros = torch.zeros_like(d_z_p)
@@ -86,9 +97,14 @@ class AdversarialVariationalBayes(GeneralizedAutoEncoder, DensityEstimator):
     def log_prob(self, x):
         # NOTE: Log prob calculated as ELBO using Discriminator net for log q(x|z)
         x = self._data_transform(x)
-        z = self.encode_transformed(x)
 
-        mu_x, log_sigma_x = self.decode_to_transformed(z)
+        sigma_denoising = 0.
+        if self.max_sigma is not None:
+            x, sigma_denoising = self._add_noise_for_denoising(x)
+
+        z = self.encode_transformed(self._expand_input_for_denoising(x, sigma_denoising, 'encoder'))
+
+        mu_x, log_sigma_x = self.decode_to_transformed(self._expand_input_for_denoising(z, sigma_denoising, 'decoder'))
         log_p_x_given_z = diagonal_gaussian_log_prob(
             x.flatten(start_dim=1),
             mu_x.flatten(start_dim=1),
@@ -96,7 +112,10 @@ class AdversarialVariationalBayes(GeneralizedAutoEncoder, DensityEstimator):
 
         # NOTE: Discriminator always is MLP so flatten inputs
         x_flat = x.flatten(start_dim=1)
-        d_z = self.discriminator(torch.cat((x_flat, z), 1))
+        d_z = self.discriminator(self._expand_input_for_denoising(torch.cat((x_flat, z), 1),
+                                                                  sigma_denoising,
+                                                                  'discriminator')
+                                 )
 
         return log_p_x_given_z - d_z
 
@@ -104,7 +123,9 @@ class AdversarialVariationalBayes(GeneralizedAutoEncoder, DensityEstimator):
     def sample_transformed(self, n_samples, true_sample=True):
         # NOTE: Same as GaussianVAE
         z = torch.randn((n_samples, self.latent_dim)).to(self.device)
-        mu, log_sigma = self.decode_to_transformed(z)
+        mu, log_sigma = self.decode_to_transformed(
+            self._expand_input_for_denoising(z, torch.zeros(z.shape[0]).to(self.device), 'decoder')
+        )
         sample = diagonal_gaussian_sample(mu, torch.exp(log_sigma)) if true_sample else mu
         return sample
 

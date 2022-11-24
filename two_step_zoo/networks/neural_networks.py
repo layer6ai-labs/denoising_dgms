@@ -52,6 +52,29 @@ class MLP(BaseNetworkClass):
         return self._get_correct_nn_output_format(self.net(x), split_dim=-1)
 
 
+class ConditioningMLP(MLP):
+    def __init__(
+            self,
+            input_dim,
+            hidden_dims,
+            output_dim,
+            activation,
+            image_height=None,
+            image_width=None
+    ):
+        super().__init__(input_dim, hidden_dims, output_dim, activation)
+        if image_height is not None:
+            assert image_height * image_width == output_dim
+        self.image_height = image_height
+        self.image_width = image_width
+
+    def forward(self, x):
+        if self.image_height is None:
+            return self.net(x)
+        else:
+            return self.net(x).reshape((-1, 1, self.image_height, self.image_width))
+
+
 class BaseCNNClass(BaseNetworkClass):
     def __init__(
             self,

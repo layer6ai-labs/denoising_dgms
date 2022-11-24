@@ -99,6 +99,12 @@ def get_avb_config(dataset, standalone):
         "use_lr_scheduler": None,
         "use_disc_lr_scheduler": True,
         "use_nll_lr_scheduler": True,
+
+        "use_tweedie_if_denoising": True,
+        "max_sigma": None,
+        "conditioning_dims_1": None,
+        "conditioning_dims_2": None,
+        "conditioning_dims_3": None,
     }
 
     if net == "mlp":
@@ -165,6 +171,8 @@ def get_bigan_config(dataset, standalone):
 
         "valid_metrics": ["l2_reconstruction_error"],
         "test_metrics": ["l2_reconstruction_error", "fid"],
+
+        "net": net,
     }
 
     if net == "mlp":
@@ -205,11 +213,20 @@ def get_vae_config(dataset, standalone):
     net = "mlp" if dataset in ["mnist", "fashion-mnist"] else "cnn"
 
     vae_base = {
+        "valid_metrics": ["loss"],
+        "test_metrics": ["fid"],
+
         "latent_dim": 20,
 
         "single_sigma": True,
 
         "use_tweedie_if_denoising": True,
+        "max_sigma": None,
+        "conditioning_dims_1": None,
+        "conditioning_dims_2": None,
+        "conditioning_dims_3": None,
+
+        "net": net,
     }
 
     if net == "mlp":
@@ -220,7 +237,7 @@ def get_vae_config(dataset, standalone):
             "decoder_net": "mlp",
             "decoder_hidden_dims": [256],
 
-            "flatten": True
+            "flatten": True,
         }
 
     elif net == "cnn":

@@ -21,6 +21,10 @@ def get_base_config(dataset, standalone):
         "flatten": True,
         "denoising_sigma": None,
         "use_tweedie_if_denoising": True,
+        "max_sigma": None,
+        "conditioning_dims_1": None,
+        "conditioning_dims_2": None,
+        "conditioning_dims_3": None,
         "dequantize": False,
         "scale_data": scale_data,
         "whitening_transform": whitening_transform,
@@ -95,6 +99,8 @@ def get_avb_config(dataset, standalone):
         "use_lr_scheduler": None,
         "use_disc_lr_scheduler": True,
         "use_nll_lr_scheduler": True,
+
+        "net": "mlp",
     }
 
 
@@ -170,6 +176,8 @@ def get_flow_config(dataset, standalone):
 
     scale_data = dataset in ["mnist", "fashion-mnist"]
     flow_config = {
+        "test_metrics": ["fid"],
+
         "scale_data": scale_data,
         "whitening_transform": not scale_data,
 
@@ -179,6 +187,8 @@ def get_flow_config(dataset, standalone):
         "num_blocks_per_layer": 3,
 
         "lr": lr,
+
+        "net": "mlp",
     }
     return {
         **flow_config,
@@ -201,7 +211,9 @@ def get_vae_config(dataset, standalone):
         "decoder_net": "mlp",
         "decoder_hidden_dims": [256],
 
-        "flatten": True
+        "flatten": True,
+
+        "net": "mlp",
     }
 
     return {

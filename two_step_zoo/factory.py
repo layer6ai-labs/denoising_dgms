@@ -4,7 +4,7 @@ from nflows.transforms.reshape import SqueezeTransform
 
 
 from . import TwoStepDensityEstimator, GaussianVAE, AdversarialVariationalBayes
-from .networks import MLP, CNN, T_CNN, GaussianMixtureLSTM
+from .networks import MLP, CNN, T_CNN, GaussianMixtureLSTM, ConditioningMLP
 from .networks import SimpleFlowTransform
 from .generalized_autoencoder import AutoEncoder, WassersteinAutoEncoder, BiGAN
 from .density_estimator import NormalizingFlow, EnergyBasedModel, GaussianMixtureLSTMModel
@@ -63,20 +63,23 @@ def get_single_module(cfg, **kwargs):
 
 
 def get_vae_module(cfg):
-    encoder, decoder = get_encoder_decoder(cfg)
+    encoder, decoder, cond_net_encoder, cond_net_decoder = get_encoder_decoder(cfg)
 
     return GaussianVAE(
         latent_dim=cfg["latent_dim"],
         encoder=encoder,
         decoder=decoder,
         use_tweedie_if_denoising=cfg.get("use_tweedie_if_denoising", True),
+        max_sigma=cfg.get("max_sigma", None),
+        conditioning_network_1=cond_net_encoder,
+        conditioning_network_2=cond_net_decoder,
         **get_data_transform_kwargs(cfg)
     )
 
 
 def get_avb_module(cfg):
-    encoder, decoder = get_encoder_decoder(cfg)
-    discriminator = get_discriminator(cfg)
+    encoder, decoder, cond_net_encoder, cond_net_decoder = get_encoder_decoder(cfg)
+    discriminator, cond_net_discriminator = get_discriminator(cfg)
 
     return AdversarialVariationalBayes(
         latent_dim=cfg["latent_dim"],
@@ -88,12 +91,16 @@ def get_avb_module(cfg):
         prior_sigma=cfg["prior_sigma"],
         cnn=True if cfg["encoder_net"] == "cnn" else False,
         use_tweedie_if_denoising=cfg.get("use_tweedie_if_denoising", True),
+        max_sigma=cfg.get("max_sigma", None),
+        conditioning_network_1=cond_net_encoder,
+        conditioning_network_2=cond_net_decoder,
+        conditioning_network_3=cond_net_discriminator,
         **get_data_transform_kwargs(cfg)
     )
 
 
 def get_ae_module(cfg):
-    encoder, decoder = get_encoder_decoder(cfg)
+    encoder, decoder, _, _ = get_encoder_decoder(cfg)
 
     return AutoEncoder(
         latent_dim=cfg["latent_dim"],
@@ -104,8 +111,8 @@ def get_ae_module(cfg):
 
 
 def get_wae_module(cfg):
-    encoder, decoder = get_encoder_decoder(cfg)
-    discriminator = get_discriminator(cfg)
+    encoder, decoder, _, _ = get_encoder_decoder(cfg)
+    discriminator, _ = get_discriminator(cfg)
 
     return WassersteinAutoEncoder(
         latent_dim=cfg["latent_dim"],
@@ -119,8 +126,8 @@ def get_wae_module(cfg):
 
 
 def get_bigan_module(cfg):
-    encoder, decoder = get_encoder_decoder(cfg)
-    discriminator = get_discriminator(cfg)
+    encoder, decoder, _, _ = get_encoder_decoder(cfg)
+    discriminator, _ = get_discriminator(cfg)
 
     return BiGAN(
         latent_dim=cfg["latent_dim"],
@@ -138,12 +145,26 @@ def get_bigan_module(cfg):
 
 
 def get_flow_module(cfg):
+    max_sigma, sigma_dim, _, _ = get_sigma_dim(cfg)
+    if sigma_dim == 0:
+        sigma_dim = None
+
+    cond_net = None
+    if cfg["conditioning_dims_1"] is not None:
+        cond_net = ConditioningMLP(
+            input_dim=1,
+            hidden_dims=cfg["conditioning_dims_1"][:-1],
+            output_dim=cfg["conditioning_dims_1"][-1],
+            activation=activation_map[cfg.get("conditioning_network_activation", _DEFAULT_ACTIVATION)],
+        )
+
     if cfg["transform"] == "simple_nsf":
         transform = SimpleFlowTransform(
             features_for_mask=cfg["data_dim"],
             hidden_features=cfg["hidden_units"],
             num_layers=cfg["num_layers"],
-            num_blocks_per_layer=cfg["num_blocks_per_layer"]
+            num_blocks_per_layer=cfg["num_blocks_per_layer"],
+            context_features=sigma_dim
         )
 
     elif cfg["transform"] == "multiscale":
@@ -194,25 +215,36 @@ def get_flow_module(cfg):
         transform=transform,
         base_distribution=base_distribution,
         use_tweedie_if_denoising=cfg.get("use_tweedie_if_denoising", True),
+        max_sigma=cfg.get("max_sigma", None),
+        conditioning_network_1=cond_net,
         **get_data_transform_kwargs(cfg)
     )
 
 
 def get_ebm_module(cfg):
     _DEFAULT_EBM_ACTIVATION = "swish"
+    max_sigma, sigma_dim, _, _ = get_sigma_dim(cfg)
 
+    cond_net = None
     if cfg["net"] == "mlp":
         energy_func = MLP(
-            input_dim=cfg["data_dim"],
+            input_dim=cfg["data_dim"]+sigma_dim,
             hidden_dims=cfg["energy_func_hidden_dims"],
             output_dim=1,
             activation=activation_map[cfg.get("energy_func_activation", _DEFAULT_EBM_ACTIVATION)],
             spectral_norm=cfg.get("spectral_norm", False),
         )
+        if cfg["conditioning_dims_1"] is not None:
+            cond_net = ConditioningMLP(
+                input_dim=1,
+                hidden_dims=cfg["conditioning_dims_1"][:-1],
+                output_dim=cfg["conditioning_dims_1"][-1],
+                activation=activation_map[cfg.get("conditioning_network_activation", _DEFAULT_ACTIVATION)],
+            )
 
     elif cfg["net"] == "cnn":
         energy_func = CNN(
-            input_channels=cfg["data_shape"][0],
+            input_channels=cfg["data_shape"][0]+sigma_dim,
             hidden_channels_list=cfg["energy_func_hidden_channels"],
             output_dim=1,
             kernel_size=cfg["energy_func_kernel_size"],
@@ -221,6 +253,15 @@ def get_ebm_module(cfg):
             activation=activation_map[cfg.get("energy_func_activation", _DEFAULT_EBM_ACTIVATION)],
             spectral_norm=cfg.get("spectral_norm", False),
         )
+        if cfg["conditioning_dims_1"] is not None:
+            cond_net = ConditioningMLP(
+                input_dim=1,
+                hidden_dims=cfg["conditioning_dims_1"][:-1],
+                output_dim=cfg["conditioning_dims_1"][-1],
+                activation=activation_map[cfg.get("conditioning_network_activation", _DEFAULT_ACTIVATION)],
+                image_height=cfg["data_shape"][1],
+                image_width=cfg["data_shape"][2],
+            )
 
     else:
         raise ValueError(f"Unknown network type {cfg['net']} for EBM")
@@ -242,6 +283,8 @@ def get_ebm_module(cfg):
         ld_grad_clamp=cfg["ld_grad_clamp"],
         loss_alpha=cfg["loss_alpha"],
         use_tweedie_if_denoising=cfg.get("use_tweedie_if_denoising", True),
+        max_sigma=cfg.get("max_sigma", None),
+        conditioning_network_1=cond_net,
         **get_data_transform_kwargs(cfg)
     )
 
@@ -270,6 +313,7 @@ def get_arm_module(cfg):
 
 def get_encoder_decoder(cfg):
     model = cfg["model"]
+    max_sigma, sigma_dim_encoder, sigma_dim_decoder, _ = get_sigma_dim(cfg)
 
     if model == "vae":
         encoder_output_dim = 2*cfg["latent_dim"]
@@ -278,18 +322,27 @@ def get_encoder_decoder(cfg):
         encoder_output_dim = cfg["latent_dim"]
         encoder_output_split_sizes = None
 
+    cond_net_encoder = None
+    cond_net_decoder = None
     if cfg["encoder_net"] == "mlp":
         encoder = MLP(
-            input_dim=cfg["data_dim"]+cfg.get("noise_dim", 0),
+            input_dim=cfg["data_dim"]+cfg.get("noise_dim", 0)+sigma_dim_encoder,
             hidden_dims=cfg["encoder_hidden_dims"],
             output_dim=encoder_output_dim,
             activation=activation_map[cfg.get("encoder_activation", _DEFAULT_ACTIVATION)],
             output_split_sizes=encoder_output_split_sizes
         )
+        if cfg["conditioning_dims_1"] is not None:
+            cond_net_encoder = ConditioningMLP(
+                input_dim=1,
+                hidden_dims=cfg["conditioning_dims_1"][:-1],
+                output_dim=cfg["conditioning_dims_1"][-1],
+                activation=activation_map[cfg.get("conditioning_network_activation", _DEFAULT_ACTIVATION)],
+            )
 
     elif cfg["encoder_net"] == "cnn":
         encoder = CNN(
-            input_channels=cfg["data_shape"][0],
+            input_channels=cfg["data_shape"][0]+sigma_dim_encoder,
             hidden_channels_list=cfg["encoder_hidden_channels"],
             output_dim=encoder_output_dim,
             kernel_size=cfg["encoder_kernel_size"],
@@ -299,10 +352,26 @@ def get_encoder_decoder(cfg):
             output_split_sizes=encoder_output_split_sizes,
             noise_dim=cfg.get("noise_dim", 0)
         )
+        if cfg["conditioning_dims_1"] is not None:
+            cond_net_encoder = ConditioningMLP(
+                input_dim=1,
+                hidden_dims=cfg["conditioning_dims_1"][:-1],
+                output_dim=cfg["conditioning_dims_1"][-1],
+                activation=activation_map[cfg.get("conditioning_network_activation", _DEFAULT_ACTIVATION)],
+                image_height=cfg["data_shape"][1],
+                image_width=cfg["data_shape"][2],
+            )
 
     else:
         raise ValueError(f"Unknown encoder network type {cfg['encoder_net']}")
 
+    if cfg["conditioning_dims_2"] is not None:
+        cond_net_decoder = ConditioningMLP(
+            input_dim=1,
+            hidden_dims=cfg["conditioning_dims_2"][:-1],
+            output_dim=cfg["conditioning_dims_2"][-1],
+            activation=activation_map[cfg.get("conditioning_network_activation", _DEFAULT_ACTIVATION)],
+        )
     if cfg["decoder_net"] == "mlp":
         if model in ["avb", "vae"]:
             decoder_sigma_dim = 1 if cfg["single_sigma"] else cfg["data_dim"]
@@ -313,7 +382,7 @@ def get_encoder_decoder(cfg):
             decoder_output_split_sizes = None
 
         decoder = MLP(
-            input_dim=cfg["latent_dim"],
+            input_dim=cfg["latent_dim"]+sigma_dim_decoder,
             hidden_dims=cfg["decoder_hidden_dims"],
             output_dim=decoder_output_dim,
             activation=activation_map[cfg.get("decoder_activation", _DEFAULT_ACTIVATION)],
@@ -330,7 +399,7 @@ def get_encoder_decoder(cfg):
             decoder_output_split_sizes = None
 
         decoder = T_CNN(
-            input_dim=cfg["latent_dim"],
+            input_dim=cfg["latent_dim"]+sigma_dim_decoder,
             hidden_channels_list=cfg["decoder_hidden_channels"],
             output_channels=decoder_output_channels,
             kernel_size=cfg["decoder_kernel_size"],
@@ -343,18 +412,29 @@ def get_encoder_decoder(cfg):
     else:
         raise ValueError(f"Unknown decoder network type {cfg['decoder_net']}")
 
-    return encoder, decoder
+    return encoder, decoder, cond_net_encoder, cond_net_decoder
 
 
 def get_discriminator(cfg):
     extra_dims = cfg["data_dim"] if cfg["model"] in ["avb", "bigan"] else 0
+    max_sigma, _, _, sigma_dim = get_sigma_dim(cfg)
+    extra_dims += sigma_dim
 
-    return MLP(
+    discriminator = MLP(
         input_dim=cfg["latent_dim"]+extra_dims,
         hidden_dims=cfg["discriminator_hidden_dims"],
         output_dim=1,
         activation=activation_map[cfg.get("discriminator_activation", _DEFAULT_ACTIVATION)]
     )
+    cond_net_discriminator = None
+    if cfg["conditioning_dims_3"] is not None:
+        cond_net_discriminator = ConditioningMLP(
+            input_dim=1,
+            hidden_dims=cfg["conditioning_dims_3"][:-1],
+            output_dim=cfg["conditioning_dims_3"][-1],
+            activation=activation_map[cfg.get("conditioning_network_activation", _DEFAULT_ACTIVATION)],
+        )
+    return discriminator, cond_net_discriminator
 
 
 def get_data_transform_kwargs(cfg):
@@ -368,3 +448,20 @@ def get_data_transform_kwargs(cfg):
         "logit_transform": cfg.get("logit_transform", False),
         "clamp_samples": cfg.get("clamp_samples", False),
     }
+
+
+def get_sigma_dim(cfg):
+    def _get_sigma(max_sigma, conditioning_dims, net):
+        sigma_dim = 0
+        if max_sigma is not None:
+            if conditioning_dims is None or net == "cnn":
+                sigma_dim = 1
+            else:
+                sigma_dim = conditioning_dims[-1]
+        return sigma_dim
+
+    max_sigma = cfg["max_sigma"]
+    sigma_dim_1 = _get_sigma(max_sigma, cfg["conditioning_dims_1"], cfg["net"])
+    sigma_dim_2 = _get_sigma(max_sigma, cfg["conditioning_dims_2"], None)
+    sigma_dim_3 = _get_sigma(max_sigma, cfg["conditioning_dims_3"], None)
+    return max_sigma, sigma_dim_1, sigma_dim_2, sigma_dim_3

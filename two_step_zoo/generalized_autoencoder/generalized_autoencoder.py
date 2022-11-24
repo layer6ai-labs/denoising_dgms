@@ -60,6 +60,11 @@ class GeneralizedAutoEncoder(TwoStepComponent):
 
     @batch_or_dataloader()
     def rec_error(self, x, return_z=False):
+        # NOTE: rec_error does not currently work for conditional models. This is because we would have to use
+        #       self._expand_input_fpr_denoising before feeding x into the encoder (and z into the decoder), but this
+        #       is a method for density estimators, not generalized autoencoders. The proper solution seems to be to
+        #       refactor VAEs and AVB into a new class which inherits from both GneralizedAutoEncoder and
+        #       DensityEstimator, and override the rec_error method.
         x = self._data_transform(x)
         z = self._encode_transformed_without_tuple(x)
         rec_x = self._decode_to_transformed_without_tuple(z)

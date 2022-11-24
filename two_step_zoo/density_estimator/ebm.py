@@ -41,9 +41,11 @@ class EnergyBasedModel(DensityEstimator):
         self.buffer = torch.rand((max_length_buffer,) + x_shape) * self.diff + x_lims[0]
         self.register_buffer('sample_buffer', self.buffer)
 
-    def _langevin_dynamics_step(self, x, step_size, sigma, grad_clamp):
+    def _langevin_dynamics_step(self, x, step_size, sigma, grad_clamp, sigma_denoising):
         x.requires_grad = True
-        out = self.energy_func(x)
+        x_expanded = self._expand_input_for_denoising(x, sigma_denoising, 'energy_func')
+        out = self.energy_func(x_expanded)
+        # out = self.energy_func(x)
         out.sum().backward()
         grad = x.grad.detach().clamp_(-grad_clamp, grad_clamp)
         with torch.no_grad():
@@ -52,7 +54,7 @@ class EnergyBasedModel(DensityEstimator):
             x.clamp_(self.x_lims[0], self.x_lims[1])
         return x
 
-    def _langevin_dynamics(self, x, steps, step_size, sigma, grad_clamp):
+    def _langevin_dynamics(self, x, steps, step_size, sigma, grad_clamp, sigma_denoising):
         # make sure no gradients wrt parameters are computed
         is_training = self.energy_func.training
         self.energy_func.eval()
@@ -63,7 +65,7 @@ class EnergyBasedModel(DensityEstimator):
         # Langevin dynamics
         torch.set_grad_enabled(True)
         for _ in range(steps):
-            x = self._langevin_dynamics_step(x, step_size, sigma, grad_clamp)
+            x = self._langevin_dynamics_step(x, step_size, sigma, grad_clamp, sigma_denoising)
 
         # leave everything like it was
         for p in self.energy_func.parameters():
@@ -76,7 +78,9 @@ class EnergyBasedModel(DensityEstimator):
     @tweedie_denoising
     def sample_transformed(self, n_samples, steps=60, step_size=10, eps_new=0.0, sigma=0.005, grad_clamp=0.03,
                            update_buffer=False):
+        sigma_denoising = torch.zeros(n_samples).to(self.device)
         x = self._sample_transformed(n_samples=n_samples,
+                                     sigma_denoising=sigma_denoising,
                                      steps=steps,
                                      step_size=step_size,
                                      eps_new=eps_new,
@@ -85,7 +89,7 @@ class EnergyBasedModel(DensityEstimator):
                                      update_buffer=update_buffer)
         return x
 
-    def _sample_transformed(self, n_samples, steps=60, step_size=10, eps_new=0.0, sigma=0.005, grad_clamp=0.03,
+    def _sample_transformed(self, n_samples, sigma_denoising, steps=60, step_size=10, eps_new=0.0, sigma=0.005, grad_clamp=0.03,
                             update_buffer=False):
         # Initialize langevin dynamics from random noise and buffer
         n_new = np.random.binomial(n_samples, eps_new)
@@ -96,7 +100,7 @@ class EnergyBasedModel(DensityEstimator):
         else:
             x = rand_x.detach().to(self.device)
 
-        x = self._langevin_dynamics(x, steps, step_size, sigma, grad_clamp)
+        x = self._langevin_dynamics(x, steps, step_size, sigma, grad_clamp, sigma_denoising)
 
         if update_buffer:
             self.buffer = torch.cat((x.cpu(), self.buffer))
@@ -108,21 +112,31 @@ class EnergyBasedModel(DensityEstimator):
     def log_prob(self, x):
         # NOTE: this function returns the log_prob up to an additive constant
         x = self._data_transform(x)
+        if self.max_sigma is not None:
+            x, sigma_denoising = self._add_noise_for_denoising(x)
+            x = self._expand_input_for_denoising(x, sigma_denoising, 'energy_func')
         return -self.energy_func(x)
 
     @batch_or_dataloader(agg_func=lambda x: torch.mean(torch.Tensor(x)))
     def loss(self, x):
         batch_size = x.shape[0]
         x = self._data_transform(x)
+        sigma_denoising = 0.
+        if self.max_sigma is not None:
+            x, sigma_denoising = self._add_noise_for_denoising(x)
+            x = self._expand_input_for_denoising(x, sigma_denoising, 'energy_func')
         pos = self.energy_func(x)
-        neg = self.energy_func(self._sample_transformed(n_samples=batch_size,
-                                                        steps=self.ld_steps,
-                                                        step_size=self.ld_step_size,
-                                                        eps_new=self.ld_eps_new,
-                                                        sigma=self.ld_sigma,
-                                                        grad_clamp=self.ld_grad_clamp,
-                                                        update_buffer=True)
-                               )
+        samples = self._sample_transformed(n_samples=batch_size,
+                                           sigma_denoising=sigma_denoising,
+                                           steps=self.ld_steps,
+                                           step_size=self.ld_step_size,
+                                           eps_new=self.ld_eps_new,
+                                           sigma=self.ld_sigma,
+                                           grad_clamp=self.ld_grad_clamp,
+                                           update_buffer=True)
+        if self.max_sigma is not None:
+            samples = self._expand_input_for_denoising(samples, sigma_denoising, 'energy_func')
+        neg = self.energy_func(samples)
         cd_loss = (pos - neg).mean()
         reg_loss = (torch.square(pos) + torch.square(neg)).mean()
         return cd_loss + self.loss_alpha * reg_loss

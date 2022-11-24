@@ -18,6 +18,7 @@ class SimpleFlowTransform(CompositeTransform):
         hidden_features,
         num_layers,
         num_blocks_per_layer,
+        context_features=None,
         include_linear=True,
         num_bins=8,
         tail_bound=1.0,
@@ -34,6 +35,8 @@ class SimpleFlowTransform(CompositeTransform):
 
         def create_resnet(in_features, out_features):
             if net == "cnn":
+                if context_features is not None:
+                    raise NotImplementedError("CNN-based conditional NF no implemented")
                 return nets.ConvResidualNet(
                     in_features,
                     out_features,
@@ -48,6 +51,7 @@ class SimpleFlowTransform(CompositeTransform):
                     in_features,
                     out_features,
                     hidden_features=hidden_features,
+                    context_features=context_features,
                     num_blocks=num_blocks_per_layer,
                     activation=activation,
                     dropout_probability=dropout_probability,

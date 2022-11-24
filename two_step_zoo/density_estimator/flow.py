@@ -1,3 +1,5 @@
+import torch
+
 from nflows.distributions import Distribution, StandardNormal
 from nflows.flows.base import Flow
 
@@ -25,15 +27,29 @@ class NormalizingFlow(DensityEstimator):
 
     @tweedie_denoising
     def sample_transformed(self, n_samples):
-        return self._nflow.sample(n_samples)
+        if self.max_sigma is not None:
+            context = torch.zeros((1, 1)).to(self.device)
+            if self.conditioning_network_1 is not None:
+                context = self.conditioning_network_1.forward(context)
+            samples = self._nflow.sample(n_samples, context=context)
+        else:
+            samples = self._nflow.sample(n_samples)
+        return samples
 
     @batch_or_dataloader()
     def log_prob(self, x):
-        # NOTE: Careful with log probability when using _data_transform()
         x = self._data_transform(x)
-        log_prob = self._nflow.log_prob(x)
+        if self.max_sigma is not None:
+            x, sigma_denoising = self._add_noise_for_denoising(x)
+            context = sigma_denoising.unsqueeze(1)
+            if self.conditioning_network_1 is not None:
+                context = self.conditioning_network_1.forward(context)
+            log_prob = self._nflow.log_prob(x, context=context)
+        else:
+            log_prob = self._nflow.log_prob(x)
 
         if len(log_prob.shape) == 1:
             log_prob = log_prob.unsqueeze(1)
 
         return log_prob
+
