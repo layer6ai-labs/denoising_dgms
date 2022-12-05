@@ -65,6 +65,7 @@ Note also that `main.py` in our codebase corresponds to `single_main.py` from th
 
 ```
 @article{
+  loaiza-ganem2022denoising,
   title = {Denoising Deep Generative Models},
   author = {Loaiza-Ganem, Gabriel and Ross, Brendan Leigh and Wu, Luhuan and Cunningham, John P. and Cresswell, Jesse C. and Caterini, Anthony L.},
   year = {2022},
